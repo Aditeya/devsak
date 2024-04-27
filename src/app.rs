@@ -1,5 +1,7 @@
+use std::sync::OnceLock;
+
 use base64::Engine;
-use egui::RichText;
+use egui::{ahash::HashSet, RichText};
 
 use crate::constants::IS_WEB;
 
@@ -17,6 +19,20 @@ pub struct Base64Encoder {
     selected: ConverstionSelected,
     input: String,
     output: String,
+}
+
+// TODO: replace with LazyLock When it comes to stable
+static VALID_CHARS: OnceLock<HashSet<char>> = OnceLock::new();
+impl Base64Encoder {
+    const ENGINE: base64::engine::GeneralPurpose = base64::engine::general_purpose::STANDARD;
+
+    // TODO: replace with LazyLock When it comes to stable
+    fn get_valid_chars() -> &'static HashSet<char> {
+        VALID_CHARS.get_or_init(|| {
+            let i = base64::alphabet::STANDARD.as_str().chars();
+            HashSet::from_iter(i)
+        })
+    }
 }
 
 impl Default for Base64Encoder {
@@ -136,17 +152,23 @@ impl eframe::App for Base64Encoder {
                 }
 
                 if input_resp.inner.changed() || converstion_changed {
-                    const ENGINE: base64::engine::GeneralPurpose =
-                        base64::engine::general_purpose::STANDARD;
                     let code = input.trim();
                     *output = match selected {
-                        ConverstionSelected::Encode => ENGINE.encode(code),
-                        ConverstionSelected::Decode => ENGINE
-                            .decode(code)
-                            .inspect_err(|e| eprintln!("Failed to decode base64: {e}"))
-                            .ok()
-                            .map(|i| String::from_utf8_lossy(&i).to_string())
-                            .unwrap_or("Invalid Input".to_string()),
+                        ConverstionSelected::Encode => Self::ENGINE.encode(code),
+                        ConverstionSelected::Decode => {
+                            // let valid_chars: Arc<HashSet<char>> = VALID_CHARS.get_or_init(|| {
+                            //     let i = base64::alphabet::STANDARD.as_str().chars();
+                            //     HashSet::from_iter(i).into()
+                            // });
+                            let code: String =
+                                code.chars().filter(|c| Self::get_valid_chars().contains(c)).collect();
+                            Self::ENGINE
+                                .decode(code)
+                                .inspect_err(|e| eprintln!("Failed to decode base64: {e}"))
+                                .ok()
+                                .map(|i| String::from_utf8_lossy(&i).to_string())
+                                .unwrap_or("Invalid Input".to_string())
+                        }
                     };
                 }
                 ui.add(
