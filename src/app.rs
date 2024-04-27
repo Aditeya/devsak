@@ -1,18 +1,30 @@
 use base64::Engine;
+use egui::RichText;
 
 use crate::constants::IS_WEB;
+
+#[derive(Default, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+enum ConverstionSelected {
+    #[default]
+    Encode,
+    Decode,
+}
 
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)] // if we add new fields, give them default values when deserializing old state
 pub struct Base64Encoder {
-    code: String
+    selected: ConverstionSelected,
+    input: String,
+    output: String,
 }
 
 impl Default for Base64Encoder {
     fn default() -> Self {
         Self {
-            code: "Hello World!".to_owned(),
+            selected: ConverstionSelected::Encode,
+            input: "Hello World!".to_owned(),
+            output: "".to_owned(),
         }
     }
 }
@@ -43,7 +55,11 @@ impl eframe::App for Base64Encoder {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Put your widgets into a `SidePanel`, `TopBottomPanel`, `CentralPanel`, `Window` or `Area`.
         // For inspiration and more examples, go to https://emilk.github.io/egui
-        let Self { code } = self;
+        let Self {
+            selected,
+            input,
+            output,
+        } = self;
 
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             // The top panel is often a good place for a menu bar:
@@ -65,37 +81,81 @@ impl eframe::App for Base64Encoder {
 
         egui::CentralPanel::default().show(ctx, |ui| {
             // The central panel the region left after adding TopPanel's and SidePanel's
-            ui.heading("Base64 Encoder");
+            ui.horizontal(|ui| {
+                ui.heading("Base64");
+                match selected {
+                    ConverstionSelected::Encode => {
+                        ui.heading(RichText::new("Encoder").strong());
+                        ui.heading("/ Decoder");
+                    }
+                    ConverstionSelected::Decode => {
+                        ui.heading("Encoder /");
+                        ui.heading(RichText::new("Decoder").strong());
+                    }
+                }
+            });
+            // ui.heading("Base64 Encoder / Decoder");
 
-            ui.label("Text");
-            egui::ScrollArea::vertical().show(ui, |ui| {
+            // NOTE: select the Converstion type
+            let converstion_input_resp = ui.horizontal(|ui| {
+                ui.label("Converstion: ");
+                egui::ComboBox::from_label("Select Converstion")
+                    .selected_text(format!("{selected:?}"))
+                    .show_ui(ui, |ui| {
+                        [
+                            ui.selectable_value(selected, ConverstionSelected::Encode, "Encode"),
+                            ui.selectable_value(selected, ConverstionSelected::Decode, "Decode"),
+                        ]
+                    })
+            });
+
+            ui.label("Input");
+            let input_resp = egui::ScrollArea::vertical().show(ui, |ui| {
                 ui.add(
-                    egui::TextEdit::multiline(code)
+                    egui::TextEdit::multiline(input)
                         .font(egui::TextStyle::Monospace) // for cursor height
                         .code_editor()
                         .hint_text("Type something!")
                         .desired_rows(10)
                         .lock_focus(false)
-                        .desired_width(f32::INFINITY)
-                        // .layouter(&mut layouter),
-                );
+                        .desired_width(f32::INFINITY), // .layouter(&mut layouter),
+                )
             });
 
             ui.separator();
 
-            ui.label("Encoded");
+            ui.label("Output");
             egui::ScrollArea::vertical().show(ui, |ui| {
-                let mut encoded = base64::engine::general_purpose::STANDARD.encode(code.as_bytes());
+                let converstion_changed = converstion_input_resp
+                    .inner
+                    .inner
+                    .is_some_and(|i| i.iter().any(|r| r.changed()));
+
+                if converstion_changed {
+                    std::mem::swap(input, output);
+                }
+
+                if input_resp.inner.changed() || converstion_changed {
+                    const ENGINE: base64::engine::GeneralPurpose =
+                        base64::engine::general_purpose::STANDARD;
+                    let code = input.trim();
+                    *output = match selected {
+                        ConverstionSelected::Encode => ENGINE.encode(code),
+                        ConverstionSelected::Decode => ENGINE
+                            .decode(code)
+                            .inspect_err(|e| eprintln!("Failed to decode base64: {e}"))
+                            .ok()
+                            .map(|i| String::from_utf8_lossy(&i).to_string())
+                            .unwrap_or("Invalid Input".to_string()),
+                    };
+                }
                 ui.add(
-                    egui::TextEdit::multiline(&mut encoded)
+                    egui::TextEdit::multiline(output)
                         .font(egui::TextStyle::Monospace) // for cursor height
-                        .code_editor()
                         .desired_rows(10)
-                        .desired_width(f32::INFINITY)
-                        // .layouter(&mut layouter),
+                        .desired_width(f32::INFINITY), // .layouter(&mut layouter),
                 );
             });
-
 
             ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
                 powered_by_egui_and_eframe(ui);
